@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+
+HOOKA=$(basename "$0")
+HOOKA_DIR=$(dirname "$(realpath "$0")")
+HOOKA_MOCK_HOOK="$HOOKA_DIR/lib/hooks"
+
+HOOKA_PATH=${HOOKA_PATH}
+HOOKA_FORCE=${HOOKA_FORCE:-0}
+HOOKA_GIT_CORE_HOOKS=${HOOKA_GIT_CORE_HOOKS:-0}
+HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH}
+
+_ARGS=()
+
+GIT_HOOKS=(
+  "applypatch-msg"
+  "commit-msg"
+  "fsmonitor-watchman"
+  "post-update"
+  "pre-applypatch"
+  "pre-commit"
+  "pre-push"
+  "pre-rebase"
+  "pre-receive"
+  "prepare-commit-msg"
+  "update"
+)
+
+# shellcheck source=lib/io.sh
+source "$HOOKA_DIR/lib/io.sh"
+# shellcheck source=lib/trap.sh
+source "$HOOKA_DIR/lib/trap.sh"
+# shellcheck source=lib/version.sh
+source "$HOOKA_DIR/lib/version.sh"
+# shellcheck source=lib/builtin.sh
+source "$HOOKA_DIR/lib/builtin.sh"
+
+function usage {
+cat << EOF
+
+                    $HOOKA: just add water
+
+Usage: $HOOKA action [options...]
+
+Options:
+  -V,  --verbose        echo every command that gets executed
+  -h,  --help           display this help
+
+Commands:
+
+  init                         init hooka
+                                 - [git < 2.9] into .git/hooks
+                                 - [git ≥ 2.9] using git.core.hooksPath
+
+  update                       [git < 2.9] update hooka in .git/hooks
+
+  destroy                      remove hooka from your repo
+                                 - [git < 2.9] remove .git/hooks
+                                 - [git ≥ 2.9] unset git.core.hooksPath
+
+  add  [hook] [name]           add [name] step to [hook]
+
+  add  [hook] [file]           add (link) [file] into [hook]
+
+  edit [hook]                  edit [hook] index
+  edit [hook] [name]           edit [name] step in [hook]
+
+  run  [hook]                  run [hook] hookahs
+  run  [hook] [name]           run [hook] [name] hookah only
+
+  help                         display this help
+
+EOF
+}
+
+function parse_args {
+  # Do not parse a starting --help|-h as an action
+  # let it fail later. HOOKA --foo means "no action"
+  ! [[ $1 =~ ^- ]] && ACTION=$1 && shift
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -V|--verbose)
+        set -x
+        ;;
+      -h|--help)
+        usage && exit
+        ;;
+      -f|--force)
+        HOOKA_FORCE=1
+        ;;
+      -)
+        _ARGS+=("$(cat "$2")")
+        shift
+        ;;
+      --)
+        shift
+        _ARGS+=("$@")
+        break
+        ;;
+      *)
+        _ARGS+=("$1")
+        ;;
+    esac
+    shift
+  done
+}
+
+function each_hook {
+  for hook in "${GIT_HOOKS[@]}"; do
+    "$@" "$HOOKA_GIT_DIR/hooks/$hook"
+  done
+}
+
+function install_hooks {
+  local force=$1
+  local hook_file=$2
+
+  [[ -f $hook_file ]] && [[ $force == 0 ]] && \
+    warn "[-] $hook_file exists, ignoring" && return
+
+  > "$hook_file" cat << EOF
+#!/usr/bin/env bash
+
+$0 run $hook
+EOF
+  chmod u+x "$hook_file"
+  inf "[+] wrote $hook_file"
+}
+
+function add_hook {
+  local name; name=$(basename "$2")
+  local dest=${HOOKAH_PATH}/$1
+  local file=$dest/$name
+
+  if [[ -f $file ]] && ! force; then
+    err "[!] $file exists, use $HOOKA edit $1 $name, or --force"
+  fi
+
+  # XXX setup ?
+  mkdir -p "$dest"
+
+  # step is an executable file
+  if [[ -n $2 ]] && [[ -x $2 ]]; then
+    ln -sF "$(realpath "$2")" "$file"
+    inf "[+] $2 -> $file $(force && echo "(--force)")"
+  else
+    local tmp
+
+    tmp=$(mktemp "/tmp/hookah.XXX")
+    on_exit "rm -f $tmp"
+
+    > "$tmp" cat << EOF
+#!/usr/bin/env bash
+
+# Write your own code here
+# Helpers available are:
+# ...
+EOF
+
+    edit "$tmp" && empty "$tmp" && err "[!] aborting due to empty file"
+
+    cp -f "$tmp" "$file" && chmod u+x "$file"
+    inf "[+] $file $(force && echo "(--force)")"
+  fi
+
+  index_hook "$file"
+}
+
+function index_hook {
+  # XXX nasty ?
+  basename "$dest/$name" >> "$dest.index"
+}
+
+function main {
+  parse_args "$@"
+
+  set -- "${_ARGS[@]}"
+
+  case $ACTION in
+    help)
+      usage && return
+      ;;
+  esac
+
+  HOOKA_GIT_DIR=$(git rev-parse --git-dir 2> /dev/null)
+  [[ -z $HOOKA_GIT_DIR ]] && err "[!] $PWD is not a git repo"
+
+  HOOKA_PATH=$(git rev-parse --show-toplevel 2> /dev/null)
+  HOOKAH_PATH=${HOOKA_PATH}/.hookah
+
+  case $ACTION in
+    init)
+      # git < 2.9 has no core.hooksPath
+      if git_version_lt 2.9; then
+        warn "[!] git version < 2.9, overriding local hooks"
+        each_hook install_hooks $HOOKA_FORCE
+      else
+        git config core.hooksPath "$HOOKA_MOCK_HOOK"
+        inf "[+] git config core.hooksPath -> $HOOKA_MOCK_HOOK"
+      fi
+      ;;
+    update)
+      # git < 2.9 has no core.hooksPath
+      if git_version_lt 2.9; then
+        each_hook install_hooks 1
+      else
+        inf "[+] git --version ≥ 2.9, nothing to update"
+      fi
+      ;;
+    destroy)
+      # git < 2.9 has no core.hooksPath
+      if git_version_lt 2.9; then
+        warn "[!] git version < 2.9"
+        confirm "This will remove hooks under .git/hooks, are you sure" \
+          && each_hook rm -f
+      else
+        git config --unset core.hooksPath
+        inf "[+] git config --unset core.hooksPath"
+      fi
+      ;;
+    add)
+      [[ -z $1 ]] || [[ -z $2 ]] && err "Need a hook type and a name or file"
+      add_hook "$1" "$2"
+      ;;
+    edit)
+      if [[ -z $2 ]]; then
+        $EDITOR "$HOOKAH_PATH/$1.index"
+      elif [[ -f $HOOKAH_PATH/$1/$2 ]]; then
+        $EDITOR "$HOOKAH_PATH/$1/$2"
+      else
+        err "[!] $HOOKAH_PATH/$1/$2 not found"
+      fi
+      ;;
+    ls)
+      # XXX Check ternaries around source !!!111one
+      if [[ -z $1 ]]; then
+        ls "$HOOKAH_PATH"/*.index
+      else
+        cat "$HOOKAH_PATH/$1.index"
+      fi
+      ;;
+    run)
+      [[ -f $HOOKAH_PATH/$1.index ]] && while read -r hook_step; do
+
+        # Run accepts a "hook step" second parameter, this filters it
+        [[ -n $2 ]] && [[ "$2" != "$hook_step" ]] \
+          && warn "[-] skipping $hook_step" \
+          && continue
+
+        inf "[+] running $hook_step"
+        "$HOOKAH_PATH/$1/$hook_step"
+      done < <(sed '/^#/d' "$HOOKAH_PATH/$1.index")
+
+      # Also run git core hook, whatever they are
+      if [[ $HOOKA_GIT_CORE_HOOKS == 1 ]]; then
+        HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH:-$(git rev-parse --git-dir)/hooks}
+        if [[ -x $HOOKA_GIT_CORE_HOOKS_PATH/$1 ]]; then
+          inf "[+] running $HOOKA_GIT_CORE_HOOKS_PATH/$1"
+          "$HOOKA_GIT_CORE_HOOKS_PATH/$1"
+        fi
+      fi
+      ;;
+    *)
+      usage && exit 1
+      ;;
+  esac
+}
+
+# Allow sourcing of this script
+if [[ $(basename "$(realpath "$0")") == "hooka" ]]; then
+  main "$@"
+fi
