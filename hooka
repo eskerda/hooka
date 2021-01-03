@@ -248,7 +248,7 @@ function main {
           && continue
 
         inf "[+] running $hook_step"
-        "$HOOKAH_PATH/$1/$hook_step"
+        "$HOOKAH_PATH/$1/$hook_step" || err "[!] $hook_step failed"
       done < <(sed '/^#/d' "$HOOKAH_PATH/$1.index")
 
       # Also run git core hook, whatever they are
@@ -256,7 +256,7 @@ function main {
         HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH:-$(git rev-parse --git-dir)/hooks}
         if [[ -x $HOOKA_GIT_CORE_HOOKS_PATH/$1 ]]; then
           inf "[+] running $HOOKA_GIT_CORE_HOOKS_PATH/$1"
-          "$HOOKA_GIT_CORE_HOOKS_PATH/$1"
+          "$HOOKA_GIT_CORE_HOOKS_PATH/$1" || err "[!] $HOOKA_GIT_CORE_HOOKS_PATH/$1 failed"
         fi
       fi
       ;;
