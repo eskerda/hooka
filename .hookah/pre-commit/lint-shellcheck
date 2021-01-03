@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+shellcheck ./**/*.sh -S error
+
+# Write your own code here
+# Helpers available are:
+# ...
