@@ -1,6 +1,14 @@
 # Hooka: just add water
 
-Yet another git hooks manager.
+An ergonomic bash only zero dependency git hooks manager.
+
+Hooka has been written with the following in mind:
+
+- does not mess up with `.git/hooks` (git ≥ 2.9).
+- compatible with running `.git/hooks`.
+- No nonsense configuration, no YAML, and can be configured with your text editor.
+
+## Usage
 
 ```bash
 
