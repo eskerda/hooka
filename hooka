@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+HOOKA_DEBUG=${HOOKA_DEBUG:-0}
+[[ "$HOOKA_DEBUG" == 1 ]] && set -x
+
 HOOKA=$(basename "$0")
 HOOKA_DIR=$(dirname "$(realpath "$0")")
 HOOKA_MOCK_HOOK="$HOOKA_DIR/lib/hooks"
@@ -81,6 +84,7 @@ function parse_args {
     case $1 in
       -V|--verbose)
         set -x
+        HOOKA_DEBUG=1
         ;;
       -h|--help)
         usage && exit
