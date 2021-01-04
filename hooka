@@ -13,6 +13,8 @@ HOOKA_GIT_CORE_HOOKS=${HOOKA_GIT_CORE_HOOKS:-0}
 HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH}
 
 _ARGS=()
+# no-parse args
+_NP_ARGS=()
 
 GIT_HOOKS=(
   "applypatch-msg"
@@ -98,7 +100,7 @@ function parse_args {
         ;;
       --)
         shift
-        _ARGS+=("$@")
+        _NP_ARGS+=("$@")
         break
         ;;
       *)
@@ -191,6 +193,7 @@ function main {
 
   HOOKA_PATH=$(git rev-parse --show-toplevel 2> /dev/null)
   HOOKAH_PATH=${HOOKA_PATH}/.hookah
+  HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH:-$HOOKA_GIT_DIR/hooks}
 
   case $ACTION in
     init)
@@ -252,15 +255,17 @@ function main {
           && continue
 
         inf "[+] running $hook_step"
-        "$HOOKAH_PATH/$1/$hook_step" || err "[!] $hook_step failed"
+        "$HOOKAH_PATH/$1/$hook_step" "${_NP_ARGS[@]}" \
+          || err "[!] $hook_step failed"
+
       done < <(sed '/^#/d' "$HOOKAH_PATH/$1.index")
 
       # Also run git core hook, whatever they are
       if [[ $HOOKA_GIT_CORE_HOOKS == 1 ]]; then
-        HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH:-$(git rev-parse --git-dir)/hooks}
         if [[ -x $HOOKA_GIT_CORE_HOOKS_PATH/$1 ]]; then
           inf "[+] running $HOOKA_GIT_CORE_HOOKS_PATH/$1"
-          "$HOOKA_GIT_CORE_HOOKS_PATH/$1" || err "[!] $HOOKA_GIT_CORE_HOOKS_PATH/$1 failed"
+          "$HOOKA_GIT_CORE_HOOKS_PATH/$1" "${_NP_ARGS[@]}" \
+            || err "[!] $HOOKA_GIT_CORE_HOOKS_PATH/$1 failed"
         fi
       fi
       ;;
