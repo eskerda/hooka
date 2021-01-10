@@ -7,7 +7,12 @@ HOOKA=$(basename "$0")
 HOOKA_DIR=$(dirname "$(realpath "$0")")
 HOOKA_MOCK_HOOK="$HOOKA_DIR/lib/hooks"
 
-HOOKA_PATH=${HOOKA_PATH}
+# relative path setting where to store hooka settings and hooks
+HOOKA_PATH=${HOOKA_PATH:-".hooka"}
+# relative path setting where to store hookahs (hook scripts)
+HOOKAH_PATH=${HOOKAH_PATH:-"hookah"}
+HOOKAH_OPTS=("silent" "phony" "reticulate")
+
 HOOKA_FORCE=${HOOKA_FORCE:-0}
 HOOKA_GIT_CORE_HOOKS=${HOOKA_GIT_CORE_HOOKS:-0}
 HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH}
@@ -42,6 +47,16 @@ source "$HOOKA_DIR/lib/builtin.sh"
 function usage {
 cat << EOF
 
+                             .===. (
+                             |   |  )
+                             |   | (
+                             |   | )
+                             |   \\*/
+                           ,'    //.
+                          :~~~~~//~~;
+                           \`.  // .'
+                         sc\`-------'
+
                     $HOOKA: just add water
 
 Usage: $HOOKA action [options...]
@@ -62,12 +77,12 @@ Commands:
                                  - [git < 2.9] remove .git/hooks
                                  - [git ≥ 2.9] unset git.core.hooksPath
 
-  add  [hook] [name]           add [name] step to [hook]
+  add  [hook] [name]           add [name] hookah to [hook]
 
   add  [hook] [file]           add (link) [file] into [hook]
 
   edit [hook]                  edit [hook] index
-  edit [hook] [name]           edit [name] step in [hook]
+  edit [name]                  edit [name] hookah
 
   run  [hook]                  run [hook] hookahs
   run  [hook] [name]           run [hook] [name] hookah only
@@ -117,64 +132,167 @@ function each_hook {
   done
 }
 
-function install_hooks {
+function install_hook {
   local force=$1
   local hook_file=$2
 
   [[ -f $hook_file ]] && [[ $force == 0 ]] && \
     warn "[-] $hook_file exists, ignoring" && return
 
-  > "$hook_file" cat << EOF
-#!/usr/bin/env bash
-
-$0 run $hook
-EOF
+  ln -sF "$HOOKA_MOCK_HOOK/_hook" "$hook_file"
   chmod u+x "$hook_file"
-  inf "[+] wrote $hook_file"
+  inf "[+] $hook_file"
 }
 
-function add_hook {
-  local name; name=$(basename "$2")
-  local dest=${HOOKAH_PATH}/$1
-  local file=$dest/$name
+function index_hookah {
+  local hook=$1
+  local hookah=$2
 
-  if [[ -f $file ]] && ! force; then
-    err "[!] $file exists, use $HOOKA edit $1 $name, or --force"
+  set -- "${@:3:$#}"
+
+  [[ -f "$HOOKA_PATH/$hook.index" ]] || > "$HOOKA_PATH/$hook.index" cat << EOF
+#
+#     .===. (
+#     |   |  )
+#     |   | (     $hook.index
+#     |   | )
+#     |   \\*/
+#   ,'    //.
+#  :~~~~~//~~;
+#   \`.  // .'
+# sc\`-------'
+
+# These lines can be re-ordered; they are executed from top to bottom.
+
+# If you remove or comment out a line here, that step WILL NOT BE RUN
+# However, if you remove everything, changes will be aborted.
+
+EOF
+
+  local line; line="$(IFS=$'\t' ; set -- "$hookah" "$@" ; echo "$*")"
+
+  lint_hookah "$line" || return 1
+
+  # XXX something better ? ?
+  printf "%s\n" "$line" >> "$HOOKA_PATH/$hook.index"
+
+  inf "[+] ${name}@${hook} $(vtfmt dim)$*$(vtfmt reset)"
+}
+
+function add_hookah { # 1: path, 2: file
+  [[ -f $2 ]] && ! force \
+    && err! "[!] $2 exists, use $HOOKA edit $1, or $HOOKA add $1 --force"
+
+  # hookah is a real path to a file
+  if [[ -f $1 ]]; then
+    ! [[ -x $1 ]] && err! "[!] $1 is a file, but is not executable"
+    ln -sF "$(realpath "$1")" "$2"
+    inf "[+] $1 -> $2 $(force && echo "(--force)")"
+
+    return
   fi
 
-  # XXX setup ?
-  mkdir -p "$dest"
+  local tmp
 
-  # step is an executable file
-  if [[ -n $2 ]] && [[ -x $2 ]]; then
-    ln -sF "$(realpath "$2")" "$file"
-    inf "[+] $2 -> $file $(force && echo "(--force)")"
-  else
-    local tmp
+  tmp=$(mktemp "/tmp/hookah.XXX")
+  on_exit "rm -f $tmp"
 
-    tmp=$(mktemp "/tmp/hookah.XXX")
-    on_exit "rm -f $tmp"
-
-    > "$tmp" cat << EOF
+  > "$tmp" cat << EOF
 #!/usr/bin/env bash
 
 # Write your own code here
-# Helpers available are:
+# XXX TODO Helpers available are:
 # ...
+
 EOF
 
-    edit "$tmp" && empty "$tmp" && err "[!] aborting due to empty file"
+  edit "$tmp" && empty "$tmp" && err! "[!] aborting due to empty file"
 
-    cp -f "$tmp" "$file" && chmod u+x "$file"
-    inf "[+] $file $(force && echo "(--force)")"
-  fi
-
-  index_hook "$file"
+  cp -f "$tmp" "$2" && chmod u+x "$2"
+  inf "[+] $2 $(force && echo "(--force)")"
 }
 
-function index_hook {
-  # XXX nasty ?
-  basename "$dest/$name" >> "$dest.index"
+function err_lint {
+  local err=$1; shift
+  local errvarn=$1; shift
+  local errvar=${!errvarn}
+
+  local pre="${*:1:(errvarn - 1)}"
+  local post="${*:(errvarn + 1):$#}"
+  local err_m=()
+  [[ -n $pre ]] && err_m+=("$pre")
+  err_m+=("$(vtfmt underline fg:red)$errvar$(vtfmt reset)")
+  [[ -n $post ]] && err_m+=("$post")
+
+  local spacing=''
+
+  [[ $errvarn -gt 1 ]] && spacing=$(printf '%*s' $((${#pre}+1)) '')
+
+  echo -e "${err_m[*]}"
+  echo -e "$spacing$(vtfmt fg:red)↳ $(vtfmt reset)$err$(vtfmt reset)"
+}
+
+function lint_hookah {
+  # shellcheck disable=SC2086
+  IFS=$'\t' set -- $1
+  { [[ -f $HOOKAH_PATH/$1 ]] && [[ -x $HOOKAH_PATH/$1 ]]; } || \
+    [[ -x "$1" ]] || hash "$1" &> /dev/null || {
+      err "$(err_lint "not something I can execute" 1 "$@")"
+      return 1
+  }
+
+  local i=2
+  while [[ $i -le $# ]]; do
+    is_in ${!i} "${HOOKAH_OPTS[@]}" || {
+      err "$(err_lint "valid options: ${HOOKAH_OPTS[*]}" $i "$@")"
+      return 1
+    }
+
+    ((i=i+1))
+  done
+
+  return 0
+}
+
+function edit_hooka {
+  local file="$1"
+
+  edit "$file" && empty "$file" && err! "[!] aborting due to empty file"
+
+  local err
+
+  while read -r line; do
+    # comment
+    if [[ "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    # whitespace
+    elif [[ "$line" =~ ^[[:space:]]*$ ]]; then
+      continue
+    else
+      lint_hookah "$line" || err=1
+    fi
+  done < "$file"
+
+  if [[ -n $err ]]; then
+    if confirm "[?] Want to go back to fix these"; then
+      edit_hooka "$file"
+
+      return $?
+    fi
+    confirm "[?] Want to save as it is" && err=0
+  fi
+
+  return $err
+}
+
+function hooked {
+  # XXX git < 2.9 has no core.hooksPath
+  if git_version_lt 2.9; then
+
+    return 1
+  fi
+
+  [[ "$(git config core.hooksPath)" == "$HOOKA_MOCK_HOOK" ]]
 }
 
 function main {
@@ -189,88 +307,138 @@ function main {
   esac
 
   HOOKA_GIT_DIR=$(git rev-parse --git-dir 2> /dev/null)
-  [[ -z $HOOKA_GIT_DIR ]] && err "[!] $PWD is not a git repo"
-
-  HOOKA_PATH=$(git rev-parse --show-toplevel 2> /dev/null)
-  HOOKAH_PATH=${HOOKA_PATH}/.hookah
+  [[ -z $HOOKA_GIT_DIR ]] && err! "[!] $PWD is not a git repo"
   HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH:-$HOOKA_GIT_DIR/hooks}
+
+  # Convert relative path settings to absolute
+  HOOKA_PATH=$(git rev-parse --show-toplevel 3> /dev/null)/$HOOKA_PATH
+  HOOKAH_PATH=${HOOKA_PATH}/$HOOKAH_PATH
+
+  mkdir -p "$HOOKA_PATH" "$HOOKAH_PATH"
 
   case $ACTION in
     init)
       # git < 2.9 has no core.hooksPath
       if git_version_lt 2.9; then
         warn "[!] git version < 2.9, overriding local hooks"
-        each_hook install_hooks $HOOKA_FORCE
+        each_hook install_hook $HOOKA_FORCE
       else
         git config core.hooksPath "$HOOKA_MOCK_HOOK"
         inf "[+] git config core.hooksPath -> $HOOKA_MOCK_HOOK"
       fi
+
+      return
+
       ;;
-    update)
-      # git < 2.9 has no core.hooksPath
-      if git_version_lt 2.9; then
-        each_hook install_hooks 1
-      else
-        inf "[+] git --version ≥ 2.9, nothing to update"
-      fi
-      ;;
+  esac
+
+  ! hooked && warn "[!] hooka hookahs not hooked, try '$HOOKA init'"
+
+  case $ACTION in
     destroy)
       # git < 2.9 has no core.hooksPath
       if git_version_lt 2.9; then
         warn "[!] git version < 2.9"
         confirm "This will remove hooks under .git/hooks, are you sure" \
           && each_hook rm -f
-      else
-        git config --unset core.hooksPath
-        inf "[+] git config --unset core.hooksPath"
+
+        return
       fi
+
+      git config --unset core.hooksPath
+      inf "[+] git config --unset core.hooksPath"
+
       ;;
+
     add)
-      [[ -z $1 ]] || [[ -z $2 ]] && err "Need a hook type and a name or file"
-      add_hook "$1" "$2"
-      ;;
-    edit)
+      [[ -z $1 ]] && usage && exit 1
+
       if [[ -z $2 ]]; then
-        $EDITOR "$HOOKAH_PATH/$1.index"
-      elif [[ -f $HOOKAH_PATH/$1/$2 ]]; then
-        $EDITOR "$HOOKAH_PATH/$1/$2"
-      else
-        err "[!] $HOOKAH_PATH/$1/$2 not found"
+        add_hookah "$1" "$HOOKAH_PATH/$(basename "$1")"
+
+        return
       fi
+
+      local name; name=$(basename "$2")
+      local file=$HOOKAH_PATH/$name
+
+      ! [[ -f $file ]] && add_hookah "$2" "$file"
+
+      local index="$HOOKA_PATH/$1.index"
+
+      [[ -f $index ]] && grep -E "^$name(\w*|$)" "$index" &> /dev/null \
+        && ! force \
+        && err! "[!] $name already in $1 (use --force to add anyway)"
+
+      index_hookah "$1" "$name" "${@:3:$#}"
+
       ;;
+
+    edit)
+      if [[ -f "$HOOKA_PATH/$1.index" ]]; then
+        local tmp; tmp=$(mktemp "/tmp/hookah.XXX"); on_exit "rm -f $tmp"
+        cp "$HOOKA_PATH/$1.index" "$tmp"
+        edit_hooka "$tmp" && cp "$tmp" "$HOOKA_PATH/$1.index"
+      elif [[ -f "$HOOKAH_PATH/$1" ]]; then
+        edit "$HOOKAH_PATH/$1"
+      else
+        err! "[!] $1 or $1.index not found"
+      fi
+
+      ;;
+
     ls)
-      # XXX Check ternaries around source !!!111one
-      if [[ -z $1 ]]; then
-        ls "$HOOKAH_PATH"/*.index
-      else
-        cat "$HOOKAH_PATH/$1.index"
-      fi
+      # XXX proper list, not this
+
+      [[ -z $1 ]] && ls -1 "$HOOKA_PATH"/*.index && return
+
+      cat "$HOOKA_PATH/$1.index"
+
       ;;
+
     run)
-      [[ -f $HOOKAH_PATH/$1.index ]] && while read -r hook_step; do
+      if [[ -f $HOOKAH_PATH/$1 ]]; then
+        inf "[+] running $1"
+        "$HOOKAH_PATH/$1" "${_NP_ARGS[@]}" || err! "[!] $1 failed"
+
+        return
+      fi
+
+      [[ -f $HOOKA_PATH/$1.index ]] && while read -r line; do
+
+        [[ -z "$line" ]] && continue
+
+        IFS=$'\t' read -ra line <<< "$line"
+
+        local hookah=${line[0]}
+        local opts=("${line[@]:1:${#line}}")
 
         # Run accepts a "hook step" second parameter, this filters it
-        [[ -n $2 ]] && [[ "$2" != "$hook_step" ]] \
-          && warn "[-] skipping $hook_step" \
+        [[ -n $2 ]] && [[ "$2" != "$hookah" ]] \
+          && warn "[-] skipping $hookah" \
           && continue
 
-        inf "[+] running $hook_step"
-        "$HOOKAH_PATH/$1/$hook_step" "${_NP_ARGS[@]}" \
-          || err "[!] $hook_step failed"
+        inf "[+] running $hookah"
+        "$HOOKAH_PATH/$hookah" "${_NP_ARGS[@]}" || err! "[!] $hookah failed"
 
-      done < <(sed '/^#/d' "$HOOKAH_PATH/$1.index")
+      done < <(sed '/^#/d' "$HOOKA_PATH/$1.index")
+
+      ! [[ $HOOKA_GIT_CORE_HOOKS == 1 ]] \
+        || ! [[ -x $HOOKA_GIT_CORE_HOOKS_PATH/$1 ]] \
+        && return
 
       # Also run git core hook, whatever they are
-      if [[ $HOOKA_GIT_CORE_HOOKS == 1 ]]; then
-        if [[ -x $HOOKA_GIT_CORE_HOOKS_PATH/$1 ]]; then
-          inf "[+] running $HOOKA_GIT_CORE_HOOKS_PATH/$1"
-          "$HOOKA_GIT_CORE_HOOKS_PATH/$1" "${_NP_ARGS[@]}" \
-            || err "[!] $HOOKA_GIT_CORE_HOOKS_PATH/$1 failed"
-        fi
-      fi
+      inf "[+] running $HOOKA_GIT_CORE_HOOKS_PATH/$1"
+      "$HOOKA_GIT_CORE_HOOKS_PATH/$1" "${_NP_ARGS[@]}" \
+        || err! "[!] $HOOKA_GIT_CORE_HOOKS_PATH/$1 failed"
+
       ;;
+
     *)
-      usage && exit 1
+      usage
+
+      exit 1
+
       ;;
   esac
 }

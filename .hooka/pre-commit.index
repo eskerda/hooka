@@ -1,0 +1,18 @@
+#
+#     .===. (
+#     |   |  )
+#     |   | (     pre-commit.index
+#     |   | )
+#     |   \*/
+#   ,'    //.
+#  :~~~~~//~~;
+#   `.  // .'
+# sc`-------'
+
+# These lines can be re-ordered; they are executed from top to bottom.
+
+# If you remove or comment out a line here, that step WILL NOT BE RUN
+# However, if you remove everything, changes will be aborted.
+
+
+lint-shellcheck

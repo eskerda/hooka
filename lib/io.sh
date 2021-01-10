@@ -61,18 +61,18 @@ function fmt_brackets {
   local color=$1; shift
 
   [[ $* =~ ^(\[.*\])(.*) ]] \
-    && >&2 echo -e "$color${BASH_REMATCH[1]}$_LOG_RESET_FMT${BASH_REMATCH[2]}" \
-    || >&2 echo -e "$*"
+    && >&2 printf "$color%b$_LOG_RESET_FMT%b" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" \
+    || >&2 printf "%b" "$*"
 }
 
-function inf  { fmt_brackets "$_LOG_INFO_FMT" "$@"; }
-function warn { fmt_brackets "$_LOG_WARN_FMT" "$@"; }
-function err  { fmt_brackets "$_LOG_ERR_FMT"  "$@"; }
+function inf  { fmt_brackets "$_LOG_INFO_FMT" "$@" "\n"; }
+function warn { fmt_brackets "$_LOG_WARN_FMT" "$@" "\n"; }
+function err  { fmt_brackets "$_LOG_ERR_FMT"  "$@" "\n"; }
 function err! { err "$@" && exit 1; }
 
 function confirm {
   local ans=${2:-"y|Y"}
   [[ $HOOKA_FORCE == 1 ]] && return 0
-  read -r -p "$1 ($ans)? "
+  read -r -p "$(fmt_brackets "$_LOG_WARN_FMT" "$1 ($ans)? ")"
   [[ $REPLY =~ $ans ]]
 }

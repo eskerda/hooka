@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 
-# XXX Go through https://git-scm.com/docs/githooks
-"$(dirname "$(realpath "$0")")/../../hooka" run "$(basename "$0")" -- "$@"
+"$(realpath "$(dirname "$0")/../../hooka")" run "$(basename "$0")" -- "$@"
