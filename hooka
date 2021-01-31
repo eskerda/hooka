@@ -16,6 +16,7 @@ HOOKAH_OPTS=("silent" "phony" "reticulate")
 HOOKA_FORCE=${HOOKA_FORCE:-0}
 HOOKA_GIT_CORE_HOOKS=${HOOKA_GIT_CORE_HOOKS:-0}
 HOOKA_GIT_CORE_HOOKS_PATH=${HOOKA_GIT_CORE_HOOKS_PATH}
+HOOKA_OPTS_IFS=${HOOKA_OPTS_IFS:-$'\t'}
 
 _ARGS=()
 # no-parse args
@@ -169,7 +170,7 @@ function index_hookah {
 
 EOF
 
-  local line; line="$(IFS=$'\t' ; set -- "$hookah" "$@" ; echo "$*")"
+  local line; line="$(IFS=$HOOKA_OPTS_IFS ; set -- "$hookah" "$@" ; echo "$*")"
 
   lint_hookah "$line" || return 1
 
@@ -234,7 +235,8 @@ function err_lint {
 
 function lint_hookah {
   # shellcheck disable=SC2086
-  IFS=$'\t' set -- $1
+  set -- $(_IFS=$IFS; IFS=$HOOKA_OPTS_IFS; set -- $1 ; IFS=$_IFS; echo "$*")
+
   { [[ -f $HOOKAH_PATH/$1 ]] && [[ -x $HOOKAH_PATH/$1 ]]; } || \
     [[ -x "$1" ]] || hash "$1" &> /dev/null || {
       err "$(err_lint "not something I can execute" 1 "$@")"
@@ -408,7 +410,7 @@ function main {
 
         [[ -z "$line" ]] && continue
 
-        IFS=$'\t' read -ra line <<< "$line"
+        IFS=$HOOKA_OPTS_IFS read -ra line <<< "$line"
 
         local hookah=${line[0]}
         local opts=("${line[@]:1:${#line}}")
