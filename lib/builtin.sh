@@ -13,3 +13,11 @@ function git_version {  git --version | sed -e 's/^git version //'; }
 function git_version_lt { version_lt "$(git_version)" "$1"; }
 
 function is_in { [[ " ${*:2:$#} " =~ [[:space:]]$1[[:space:]] ]]; }
+function index {
+  i=2
+  while [[ $i -le $# ]]; do
+    [[ ${!i} == "$1" ]] && echo $((i-2)) && return 0
+    ((i=i+1))
+  done
+  return 1
+}

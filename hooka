@@ -245,6 +245,10 @@ function lint_hookah {
 
   local i=2
   while [[ $i -le $# ]]; do
+
+    # stop parsing if "--" and accept anything after
+    [[ ${!i} == "--" ]] && return 0
+
     is_in ${!i} "${HOOKAH_OPTS[@]}" || {
       err "$(err_lint "valid options: ${HOOKAH_OPTS[*]}" $i "$@")"
       return 1
@@ -413,7 +417,9 @@ function main {
         IFS=$HOOKA_OPTS_IFS read -ra line <<< "$line"
 
         local hookah=${line[0]}
-        local opts=("${line[@]:1:${#line}}")
+        local optsend=$(index "--" "${line[@]}" || echo ${#line})
+        local opts=("${line[@]:1:$optsend-1}")
+        local args=("${line[@]:$optsend+1:${#line}}")
 
         # Run accepts a "hook step" second parameter, this filters it
         [[ -n $2 ]] && [[ "$2" != "$hookah" ]] \
@@ -421,7 +427,7 @@ function main {
           && continue
 
         inf "[+] running $hookah"
-        "$HOOKAH_PATH/$hookah" "${_NP_ARGS[@]}" || err! "[!] $hookah failed"
+        "$HOOKAH_PATH/$hookah" "${args[@]}" "${_NP_ARGS[@]}" || err! "[!] $hookah failed"
 
       done < <(sed '/^#/d' "$HOOKA_PATH/$1.index")
 
